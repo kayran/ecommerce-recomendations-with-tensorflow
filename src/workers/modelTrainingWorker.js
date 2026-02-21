@@ -6,7 +6,7 @@ import { workerEvents } from '../events/constants.js';
 // Why? Keeps all features balanced so no one dominates training
 // Formula: (val - min) / (max - min)
 // Example: price=129.99, minPrice=39.99, maxPrice=199.99 → 0.56
-const normalize = (value, min, max) => (value - min) / ((max - min) || 1)
+const normalize = (value, min, max) => (value - min) / ((max - min) || 1);
 
 function makeContext(products, users) {
     const ages = users.map(u => u.age)
@@ -66,7 +66,7 @@ function makeContext(products, users) {
         numCategories: categories.length,
         numColors: colors.length,
         // price + age + colors + categories
-        dimentions: 2 + categories.length + colors.length
+        dimensions: 2 + categories.length + colors.length
     }
 }
 
@@ -74,7 +74,7 @@ function makeContext(products, users) {
 async function trainModel({ users }) {
     console.log('Training model with users:', users);
     postMessage({ type: workerEvents.progressUpdate, progress: { progress: 1 } });
-    const products = await (await fetch('/data/products.json')).json()
+    const products = await (await fetch('/data/products.json')).json();
 
     const context = makeContext(products, users)
     debugger
