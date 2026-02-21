@@ -3,6 +3,8 @@ import { workerEvents } from '../events/constants.js';
 
 let _globalCtx = {};
 
+let _model = {};
+
 const WEIGHTS = {
     price: 0.2,
     age: 0.1,
@@ -92,6 +94,110 @@ function encodeProduct(product, context) {
     return tf.concat1d([price, age, color, category])
 }
 
+function encodeUser(user, context) {
+    if (user.purchases.length) {
+        return tf.stack(
+            user.purchases.map(
+                p => encodeProduct(p, context)
+            )
+        ).mean(0)
+        .reshape([1, context.dimensions])
+    }
+}
+
+function createTrainingData(context) {
+    const inputs = [];
+    const labels = [];
+    context.users
+    .filter(user => user.purchases.length)
+    .forEach(user => {
+        const userVector = encodeUser(user, context).dataSync();
+        context.products.forEach(product => {
+            const productVector = encodeProduct(product, context).dataSync();
+
+            const label = user.purchases.some(
+                p => p.name === product.name ? 1 : 0
+            );
+
+            inputs.push([...userVector, ...productVector]);
+            labels.push(label);
+        })
+    })
+
+    return { 
+        xs: tf.tensor2d(inputs), 
+        ys: tf.tensor2d(labels, [labels.length, 1]),
+        inputDimensions: context.dimensions * 2 
+    }
+}
+
+async function configureNeuralNetAndTrain(trainingData) {
+    const model = tf.sequential();
+
+    model.add(
+        tf.layers.dense({
+            inputShape: [trainingData.inputDimensions],
+            units: 128,
+            activation: 'relu'
+        })
+    )
+
+    model.add(
+        tf.layers.dense({
+            units: 64,
+            activation: 'relu'
+        })
+    )
+
+    model.add(
+        tf.layers.dense({
+            units: 32,
+            activation: 'relu'
+        })
+    )
+
+    model.add(
+        tf.layers.dense({
+            units: 1,
+            activation: 'sigmoid'
+        })
+    )
+
+    model.compile({
+        optimizer: tf.train.adam(0.01),
+        loss: 'binaryCrossentropy',
+        metrics: ['accuracy']
+    });
+    
+    await model.fit(trainingData.xs, trainingData.ys, {
+        epochs: 100,
+        batchSize: 32,
+        shuffle: true,
+        callbacks: {
+            onEpochEnd: (epoch, logs) => {
+                console.log(`Epoch ${epoch + 1}: loss = ${logs.loss}, accuracy = ${logs.acc}`);
+                postMessage({
+                    type: workerEvents.trainingLog,
+                    epoch,
+                    loss: logs.loss,
+                    accuracy: logs.acc
+                });
+            }
+        }
+    });
+
+    // const history = await model.fit(trainingData.xs, trainingData.ys, {
+    //     epochs: 10,
+    //     batchSize: 32,
+    //     callbacks: {
+    //         onEpochEnd: (epoch, logs) => {
+    //             console.log(`Epoch ${epoch + 1}: loss = ${logs.loss}, accuracy = ${logs.accuracy}`);
+    //         }
+    //     }
+    // });
+    
+}
+
 async function trainModel({ users }) {
     console.log('Training model with users:', users);
     postMessage({ type: workerEvents.progressUpdate, progress: { progress: 1 } });
@@ -108,7 +214,10 @@ async function trainModel({ users }) {
     })
 
     _globalCtx = context;
-    debugger
+
+    const trainingData = createTrainingData(context);
+
+    await configureNeuralNetAndTrain(trainingData);
 
     postMessage({ type: workerEvents.progressUpdate, progress: { progress: 100 } });
     postMessage({ type: workerEvents.trainingComplete });
