@@ -1,6 +1,16 @@
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
 import { workerEvents } from '../events/constants.js';
 
+let _globalCtx = {};
+
+const WEIGHTS = {
+    price: 0.2,
+    age: 0.1,
+    category: 0.4,
+    color: 0.3
+}
+
+const DEFAULT_AGE = 0.5
 
 // 🔢 Normalize continuous values (price, age) to 0–1 range
 // Why? Keeps all features balanced so no one dominates training
@@ -70,13 +80,34 @@ function makeContext(products, users) {
     }
 }
 
+const oneHotWeighted = (index, leng, weight) => tf.oneHot(index, leng).cast('float32').mul(weight)
+
+function encodeProduct(product, context) {
+
+    const price = tf.tensor1d([normalize(product.price, context.minPrice, context.maxPrice) * WEIGHTS.price])
+    const age = tf.tensor1d([context.productAvgAgeNorm[product.name] ?? DEFAULT_AGE * WEIGHTS.age])
+    const color = oneHotWeighted(context.colorsIndex[product.color], context.numColors, WEIGHTS.color)
+    const category = oneHotWeighted(context.categoriesIndex[product.category], context.numCategories, WEIGHTS.category)
+
+    return tf.concat1d([price, age, color, category])
+}
 
 async function trainModel({ users }) {
     console.log('Training model with users:', users);
     postMessage({ type: workerEvents.progressUpdate, progress: { progress: 1 } });
     const products = await (await fetch('/data/products.json')).json();
 
-    const context = makeContext(products, users)
+    const context = makeContext(products, users);
+
+    context.productVectors = products.map(p => {
+        return {
+            name: p.name,
+            meta: { ...p },
+            vector: encodeProduct(p, context)
+        }
+    })
+
+    _globalCtx = context;
     debugger
 
     postMessage({ type: workerEvents.progressUpdate, progress: { progress: 100 } });
